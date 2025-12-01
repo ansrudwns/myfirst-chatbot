@@ -163,7 +163,6 @@ def generate_auto_title(user_query):
 def search_arxiv(query, max_results=3):
     try:
         client = arxiv.Client()
-        # [로직 유지] 관련도순으로 넉넉히(4배수) 가져온 뒤 -> 최신순 정렬
         search = arxiv.Search(
             query=query,
             max_results=max_results * 4, 
@@ -174,9 +173,7 @@ def search_arxiv(query, max_results=3):
         if not results:
             return None, 0
 
-        # 최신순 정렬 (내림차순)
         results.sort(key=lambda x: x.published, reverse=True)
-        # 사용자 설정 개수(max_results)만큼 자르기
         results = results[:max_results]
 
         results_text = []
@@ -207,11 +204,11 @@ init_db()
 if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None
 
-# --- [사이드바 UI 구성 (요청 순서 반영)] ---
+# --- [사이드바 UI] ---
 with st.sidebar:
     st.title("🗂️ 대화 관리")
     
-    # 1. 대화 검색 (가장 위)
+    # 1. 대화 검색
     search_query = st.text_input("🔍 대화 검색", placeholder="키워드 입력...")
     if search_query:
         st.caption("검색 결과")
@@ -236,10 +233,10 @@ with st.sidebar:
 
     st.divider()
 
-    # 3. 설정 섹션 (인용 형식 & 논문 개수)
+    # 3. 설정 섹션
     st.subheader("⚙️ 검색 옵션 설정")
     
-    # (1) 인용 형식 설정 (드롭다운)
+    # (1) 인용 형식
     selected_style_key = st.selectbox(
         "논문 분야 (인용 형식)",
         options=list(CITATION_STYLES.keys()),
@@ -247,21 +244,20 @@ with st.sidebar:
     )
     target_citation_style = CITATION_STYLES[selected_style_key]
 
-    # (2) [신규 기능] 논문 개수 설정 (숫자 입력)
+    # (2) 논문 개수
     target_paper_count = st.number_input(
         "검색할 논문 개수 (최신순)",
         min_value=1,
         max_value=10,
-        value=3, # 기본값 3
-        step=1,
-        help="설정한 개수만큼 최신 논문을 가져옵니다."
+        value=3,
+        step=1
     )
     
     st.info(f"설정: **{target_citation_style}**, **{target_paper_count}개**")
 
     st.divider()
 
-    # 4. 최근 대화 목록 (가장 아래)
+    # 4. 최근 대화 목록
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
@@ -270,12 +266,55 @@ with st.sidebar:
             col1, col2 = st.columns([3, 1])
             with col1:
                 new_name = st.text_input("제목", value=s_title, key=f"input_{s_id}", label_visibility="collapsed")
-            w색 중... ({target_paper_count}개)"):
+            with col2:
+                if st.button("💾", key=f"save_{s_id}", use_container_width=True):
+                    update_session_title(s_id, new_name)
+                    st.rerun()
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("📂 열기", key=f"open_{s_id}", use_container_width=True):
+                    st.session_state.current_session_id = s_id
+                    st.rerun()
+            with col_b:
+                if st.button("🗑️ 삭제", key=f"del_{s_id}", type="primary", use_container_width=True):
+                    delete_session(s_id)
+                    if st.session_state.current_session_id == s_id:
+                        st.session_state.current_session_id = None
+                    st.rerun()
+
+# --- [메인 화면] ---
+
+if not st.session_state.current_session_id:
+    all_sessions = get_all_sessions()
+    if all_sessions:
+        st.session_state.current_session_id = all_sessions[0][0]
+    else:
+        st.session_state.current_session_id = create_session()
+
+current_messages = get_messages(st.session_state.current_session_id)
+is_first_message = len(current_messages) == 0
+
+session_title, session_date = get_session_info(st.session_state.current_session_id)
+st.title(f"🎓 {session_title}")
+st.caption(f"생성일: {session_date} | Paper Mate Pro")
+
+for msg in current_messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생성됨)..."):
+    
+    st.chat_message("user").markdown(prompt)
+    save_message(st.session_state.current_session_id, "user", prompt)
+
+    # [수정] 오류가 발생했던 부분을 단순화하여 수정했습니다.
+    # f-string 안에서 줄바꿈 없이 한 줄로 작성하는 것이 안전합니다.
+    with st.spinner(f"🌏 '{prompt}' 분석 중... ({target_paper_count}개)"):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
 
-            # [수정] 사용자가 설정한 개수(target_paper_count)를 함수에 전달
             search_context, paper_count = search_arxiv(english_query, max_results=target_paper_count)
             
             if not search_context:
