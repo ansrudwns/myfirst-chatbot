@@ -274,7 +274,7 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
-    with st.spinner(f"🌏 '{prompt}' 분석 중..."):
+    with st.spinner(f"🌏 '{prompt}' 검색 중..."):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
@@ -323,4 +323,5 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
+
 
