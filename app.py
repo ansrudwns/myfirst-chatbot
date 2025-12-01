@@ -20,7 +20,7 @@ client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OAI_ENDPOINT")
 )
 
-# --- [인용 스타일 매핑 데이터] ---
+# --- [인용 스타일 데이터] ---
 CITATION_STYLES = {
     "심리학, 교육, 사회과학 - APA": "APA Style (7th Edition)",
     "인문학, 문학 - MLA": "MLA Style (9th Edition)",
@@ -163,9 +163,10 @@ def generate_auto_title(user_query):
 def search_arxiv(query, max_results=3):
     try:
         client = arxiv.Client()
+        # [로직 유지] 관련도순으로 넉넉히(4배수) 가져온 뒤 -> 최신순 정렬
         search = arxiv.Search(
             query=query,
-            max_results=max_results * 4,
+            max_results=max_results * 4, 
             sort_by=arxiv.SortCriterion.Relevance
         )
         results = list(client.results(search))
@@ -173,7 +174,9 @@ def search_arxiv(query, max_results=3):
         if not results:
             return None, 0
 
+        # 최신순 정렬 (내림차순)
         results.sort(key=lambda x: x.published, reverse=True)
+        # 사용자 설정 개수(max_results)만큼 자르기
         results = results[:max_results]
 
         results_text = []
@@ -204,32 +207,12 @@ init_db()
 if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None
 
-# --- [사이드바] ---
+# --- [사이드바 UI 구성 (요청 순서 반영)] ---
 with st.sidebar:
     st.title("🗂️ 대화 관리")
     
-    if st.button("➕ 새 대화 시작", use_container_width=True):
-        new_id = create_session()
-        st.session_state.current_session_id = new_id
-        st.rerun()
-
-    st.divider()
-
-    # 1. [기능 추가] 인용 스타일 선택 드롭다운
-    st.subheader("🎓 인용 형식 설정")
-    selected_style_key = st.selectbox(
-        "논문 분야를 선택하세요:",
-        options=list(CITATION_STYLES.keys()),
-        index=0 # 기본값: 첫 번째(APA)
-    )
-    # 선택된 키를 실제 영어 프롬프트용 문자열로 변환
-    target_citation_style = CITATION_STYLES[selected_style_key]
-    
-    st.info(f"선택된 스타일: **{target_citation_style}**")
-    st.divider()
-
-    # 2. 검색
-    search_query = st.text_input("🔍 대화 검색", placeholder="키워드...")
+    # 1. 대화 검색 (가장 위)
+    search_query = st.text_input("🔍 대화 검색", placeholder="키워드 입력...")
     if search_query:
         st.caption("검색 결과")
         results = search_history(search_query)
@@ -242,10 +225,43 @@ with st.sidebar:
                     st.rerun()
         else:
             st.info("결과 없음")
-    
+
     st.divider()
 
-    # 3. 최근 대화 목록
+    # 2. 새 대화 시작
+    if st.button("➕ 새 대화 시작", use_container_width=True):
+        new_id = create_session()
+        st.session_state.current_session_id = new_id
+        st.rerun()
+
+    st.divider()
+
+    # 3. 설정 섹션 (인용 형식 & 논문 개수)
+    st.subheader("⚙️ 검색 옵션 설정")
+    
+    # (1) 인용 형식 설정 (드롭다운)
+    selected_style_key = st.selectbox(
+        "논문 분야 (인용 형식)",
+        options=list(CITATION_STYLES.keys()),
+        index=0
+    )
+    target_citation_style = CITATION_STYLES[selected_style_key]
+
+    # (2) [신규 기능] 논문 개수 설정 (숫자 입력)
+    target_paper_count = st.number_input(
+        "검색할 논문 개수 (최신순)",
+        min_value=1,
+        max_value=10,
+        value=3, # 기본값 3
+        step=1,
+        help="설정한 개수만큼 최신 논문을 가져옵니다."
+    )
+    
+    st.info(f"설정: **{target_citation_style}**, **{target_paper_count}개**")
+
+    st.divider()
+
+    # 4. 최근 대화 목록 (가장 아래)
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
@@ -254,67 +270,24 @@ with st.sidebar:
             col1, col2 = st.columns([3, 1])
             with col1:
                 new_name = st.text_input("제목", value=s_title, key=f"input_{s_id}", label_visibility="collapsed")
-            with col2:
-                if st.button("💾", key=f"save_{s_id}", use_container_width=True):
-                    update_session_title(s_id, new_name)
-                    st.rerun()
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("📂 열기", key=f"open_{s_id}", use_container_width=True):
-                    st.session_state.current_session_id = s_id
-                    st.rerun()
-            with col_b:
-                if st.button("🗑️ 삭제", key=f"del_{s_id}", type="primary", use_container_width=True):
-                    delete_session(s_id)
-                    if st.session_state.current_session_id == s_id:
-                        st.session_state.current_session_id = None
-                    st.rerun()
-
-# --- [메인 화면] ---
-
-if not st.session_state.current_session_id:
-    all_sessions = get_all_sessions()
-    if all_sessions:
-        st.session_state.current_session_id = all_sessions[0][0]
-    else:
-        st.session_state.current_session_id = create_session()
-
-current_messages = get_messages(st.session_state.current_session_id)
-is_first_message = len(current_messages) == 0
-
-session_title, session_date = get_session_info(st.session_state.current_session_id)
-st.title(f"🎓 {session_title}")
-st.caption(f"생성일: {session_date} | Paper Mate Pro")
-
-for msg in current_messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-if prompt := st.chat_input("논문 주제를 입력하세요..."):
-    
-    st.chat_message("user").markdown(prompt)
-    save_message(st.session_state.current_session_id, "user", prompt)
-
-    with st.spinner(f"🌏 '{prompt}' 검색 중..."):
+            w색 중... ({target_paper_count}개)"):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
 
-            search_context, paper_count = search_arxiv(english_query)
+            # [수정] 사용자가 설정한 개수(target_paper_count)를 함수에 전달
+            search_context, paper_count = search_arxiv(english_query, max_results=target_paper_count)
             
             if not search_context:
                 assistant_reply = "검색 결과가 없습니다."
             else:
-                # [핵심 변경] 사용자가 선택한 Citation Style을 프롬프트에 주입
                 full_prompt = f"""
                 사용자: '{prompt}'
                 
                 [지시사항]
-                1. {paper_count}개 논문 모두 답변하세요.
+                1. 검색된 **{paper_count}개** 논문 모두에 대해 답변하세요.
                 2. 한국어 요약 필수.
-                3. 인용구 작성 시 **'{target_citation_style}'** 형식을 엄격히 따르세요.
-                   (ArXiv 논문이므로 인용구 끝에 반드시 URL을 포함하세요.)
+                3. 인용구는 **'{target_citation_style}'** 형식을 따르세요 (URL 필수 포함).
                 
                 [검색 데이터]
                 {search_context}
@@ -323,7 +296,7 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
                 ### [번호]. [제목] (연도)
                 * **요약:** (한국어)
                 * **Citation ({target_citation_style}):** (형식 준수, URL 포함)
-                * **PDF:** (URL)
+                * **PDF 링크:** (URL)
                 ---
                 """
                 messages_for_api = [{"role": "system", "content": "논문 검색 및 인용 전문가입니다."}]
@@ -348,4 +321,3 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
-
