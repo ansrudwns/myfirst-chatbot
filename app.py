@@ -202,16 +202,19 @@ with st.sidebar:
     
     st.divider()
 
-    # 1. 검색 (수정됨: key 값을 고정)
+    # 1. 검색 (수정됨: Duplicate Key 오류 해결)
     search_query = st.text_input("🔍 대화 검색", placeholder="키워드...")
     if search_query:
         st.caption("검색 결과")
         results = search_history(search_query)
         if results:
-            for s_id, s_title, content_snippet in results:
+            # enumerate를 사용하여 각 결과에 고유 번호(idx) 부여
+            for idx, (s_id, s_title, content_snippet) in enumerate(results):
                 snippet = content_snippet[:20] + "..."
-                # [수정 포인트] key에 uuid 대신 s_id를 사용하여 고정된 ID 부여
-                btn_key = f"search_res_{s_id}" 
+                
+                # [수정 핵심] Key를 '세션ID + 순서번호'로 조합하여 절대 겹치지 않게 함
+                btn_key = f"search_res_{s_id}_{idx}" 
+                
                 if st.button(f"📄 {s_title}\nMatch: {snippet}", key=btn_key, use_container_width=True):
                     st.session_state.current_session_id = s_id
                     st.rerun()
@@ -220,7 +223,7 @@ with st.sidebar:
     
     st.divider()
 
-    # 2. 최근 대화 목록 (간격 좁힘 유지)
+    # 2. 최근 대화 목록
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
