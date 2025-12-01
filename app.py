@@ -335,7 +335,7 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
                 ### [번호]. [제목] (연도)
                 * **요약:** (한국어)
                 * **Citation ({target_citation_style}):** (형식 준수, URL 포함)
-                * **PDF 링크:** (URL)
+                * **PDF:** (URL)
                 ---
                 """
                 messages_for_api = [{"role": "system", "content": "논문 검색 및 인용 전문가입니다."}]
@@ -360,3 +360,4 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
+
