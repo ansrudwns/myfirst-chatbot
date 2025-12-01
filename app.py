@@ -20,6 +20,19 @@ client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OAI_ENDPOINT")
 )
 
+# --- [인용 스타일 매핑 데이터] ---
+CITATION_STYLES = {
+    "심리학, 교육, 사회과학 - APA": "APA Style (7th Edition)",
+    "인문학, 문학 - MLA": "MLA Style (9th Edition)",
+    "인문학, 문학2 - Chicago NB": "Chicago Style (Notes and Bibliography)",
+    "공학 - IEEE": "IEEE Style",
+    "의학 - AMA": "AMA Style",
+    "의학2 - Vancouver": "Vancouver Style",
+    "자연과학 - Harvard": "Harvard Style",
+    "자연과학2 - APA": "APA Style (7th Edition)",
+    "자연과학3 - Chicago AD": "Chicago Style (Author-Date)",
+}
+
 # --- [데이터베이스 관리 함수] ---
 DB_NAME = "chat_history.db"
 
@@ -199,22 +212,31 @@ with st.sidebar:
         new_id = create_session()
         st.session_state.current_session_id = new_id
         st.rerun()
-    
+
     st.divider()
 
-    # 1. 검색 (수정됨: Duplicate Key 오류 해결)
+    # 1. [기능 추가] 인용 스타일 선택 드롭다운
+    st.subheader("🎓 인용 형식 설정")
+    selected_style_key = st.selectbox(
+        "논문 분야를 선택하세요:",
+        options=list(CITATION_STYLES.keys()),
+        index=0 # 기본값: 첫 번째(APA)
+    )
+    # 선택된 키를 실제 영어 프롬프트용 문자열로 변환
+    target_citation_style = CITATION_STYLES[selected_style_key]
+    
+    st.info(f"선택된 스타일: **{target_citation_style}**")
+    st.divider()
+
+    # 2. 검색
     search_query = st.text_input("🔍 대화 검색", placeholder="키워드...")
     if search_query:
         st.caption("검색 결과")
         results = search_history(search_query)
         if results:
-            # enumerate를 사용하여 각 결과에 고유 번호(idx) 부여
             for idx, (s_id, s_title, content_snippet) in enumerate(results):
                 snippet = content_snippet[:20] + "..."
-                
-                # [수정 핵심] Key를 '세션ID + 순서번호'로 조합하여 절대 겹치지 않게 함
                 btn_key = f"search_res_{s_id}_{idx}" 
-                
                 if st.button(f"📄 {s_title}\nMatch: {snippet}", key=btn_key, use_container_width=True):
                     st.session_state.current_session_id = s_id
                     st.rerun()
@@ -223,7 +245,7 @@ with st.sidebar:
     
     st.divider()
 
-    # 2. 최근 대화 목록
+    # 3. 최근 대화 목록
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
@@ -269,12 +291,12 @@ for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("논문 주제를 입력하세요..."):
+if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생성됨)..."):
     
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
-    with st.spinner(f"🌏 '{prompt}' 검색 중..."):
+    with st.spinner(f"🌏 '{prompt}' 분석 중..."):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
@@ -284,12 +306,15 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             if not search_context:
                 assistant_reply = "검색 결과가 없습니다."
             else:
+                # [핵심 변경] 사용자가 선택한 Citation Style을 프롬프트에 주입
                 full_prompt = f"""
                 사용자: '{prompt}'
                 
                 [지시사항]
-                1. {paper_count}개 논문 모두 답변.
-                2. 한국어 요약 & APA 인용(URL 포함).
+                1. {paper_count}개 논문 모두 답변하세요.
+                2. 한국어 요약 필수.
+                3. 인용구 작성 시 **'{target_citation_style}'** 형식을 엄격히 따르세요.
+                   (ArXiv 논문이므로 인용구 끝에 반드시 URL을 포함하세요.)
                 
                 [검색 데이터]
                 {search_context}
@@ -297,11 +322,11 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
                 --- 답변 형식 ---
                 ### [번호]. [제목] (연도)
                 * **요약:** (한국어)
-                * **APA Citation:** (URL 포함)
-                * **PDF:** (URL)
+                * **Citation ({target_citation_style}):** (형식 준수, URL 포함)
+                * **PDF 링크:** (URL)
                 ---
                 """
-                messages_for_api = [{"role": "system", "content": "논문 검색 도우미입니다."}]
+                messages_for_api = [{"role": "system", "content": "논문 검색 및 인용 전문가입니다."}]
                 messages_for_api.extend(current_messages)
                 messages_for_api.append({"role": "user", "content": full_prompt})
 
@@ -323,5 +348,3 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
-
-
