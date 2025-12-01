@@ -134,13 +134,12 @@ def translate_to_english_keyword(user_query):
     except Exception:
         return user_query
 
-# [신규 기능] 대화 내용 기반 제목 생성 함수
 def generate_auto_title(user_query):
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Summarize the user's query into a concise Korean title (max 15 characters, no quotes, no special chars)."},
+                {"role": "system", "content": "Summarize the user's query into a concise Korean title (max 15 characters, no quotes)."},
                 {"role": "user", "content": user_query}
             ]
         )
@@ -151,7 +150,6 @@ def generate_auto_title(user_query):
 def search_arxiv(query, max_results=3):
     try:
         client = arxiv.Client()
-        # 관련도 순으로 넉넉히 가져와서 최신순 재정렬
         search = arxiv.Search(
             query=query,
             max_results=max_results * 4,
@@ -162,7 +160,6 @@ def search_arxiv(query, max_results=3):
         if not results:
             return None, 0
 
-        # 최신순 정렬 (내림차순)
         results.sort(key=lambda x: x.published, reverse=True)
         results = results[:max_results]
 
@@ -196,23 +193,6 @@ if "current_session_id" not in st.session_state:
 
 # --- [사이드바] ---
 with st.sidebar:
-    
-    # 검색
-    search_query = st.text_input("🔍 대화 검색", placeholder="키워드...")
-    if search_query:
-        st.caption("검색 결과")
-        results = search_history(search_query)
-        if results:
-            for s_id, s_title, content_snippet in results:
-                snippet = content_snippet[:20] + "..."
-                if st.button(f"📄 {s_title}\nMatch: {snippet}", key=f"search_{s_id}_{uuid.uuid4()}", use_container_width=True):
-                    st.session_state.current_session_id = s_id
-                    st.rerun()
-        else:
-            st.info("결과 없음")
-    
-    st.divider()
-    
     st.title("🗂️ 대화 관리")
     
     if st.button("➕ 새 대화 시작", use_container_width=True):
@@ -222,7 +202,25 @@ with st.sidebar:
     
     st.divider()
 
-    # 최근 대화 목록 (UI 개선)
+    # 1. 검색 (수정됨: key 값을 고정)
+    search_query = st.text_input("🔍 대화 검색", placeholder="키워드...")
+    if search_query:
+        st.caption("검색 결과")
+        results = search_history(search_query)
+        if results:
+            for s_id, s_title, content_snippet in results:
+                snippet = content_snippet[:20] + "..."
+                # [수정 포인트] key에 uuid 대신 s_id를 사용하여 고정된 ID 부여
+                btn_key = f"search_res_{s_id}" 
+                if st.button(f"📄 {s_title}\nMatch: {snippet}", key=btn_key, use_container_width=True):
+                    st.session_state.current_session_id = s_id
+                    st.rerun()
+        else:
+            st.info("결과 없음")
+    
+    st.divider()
+
+    # 2. 최근 대화 목록 (간격 좁힘 유지)
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
@@ -257,7 +255,6 @@ if not st.session_state.current_session_id:
     else:
         st.session_state.current_session_id = create_session()
 
-# 화면 표시 전, 현재 메시지 개수 확인 (첫 질문인지 판단용)
 current_messages = get_messages(st.session_state.current_session_id)
 is_first_message = len(current_messages) == 0
 
@@ -316,11 +313,10 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
             
             save_message(st.session_state.current_session_id, "assistant", assistant_reply)
             
-            # [핵심 로직] 첫 번째 대화였다면, 제목 자동 생성 후 새로고침
             if is_first_message:
-                auto_title = generate_auto_title(prompt) # LLM이 제목 생성
+                auto_title = generate_auto_title(prompt)
                 update_session_title(st.session_state.current_session_id, auto_title)
-                st.rerun() # 사이드바와 제목 업데이트를 위해 리로드
+                st.rerun()
             
         except Exception as e:
             st.error(f"오류: {e}")
