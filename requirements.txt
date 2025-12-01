@@ -1,3 +1,4 @@
 streamlit
 openai
+arxiv
 python-dotenv
