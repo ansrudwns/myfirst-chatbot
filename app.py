@@ -3,7 +3,7 @@ import os
 import arxiv
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone # [수정] timezone, timedelta 추가
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
@@ -63,7 +63,11 @@ def create_session(title="새로운 대화"):
     session_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # [수정 핵심] 한국 시간(KST) 설정 (UTC+9)
+    KST = timezone(timedelta(hours=9))
+    timestamp = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    
     c.execute("INSERT INTO sessions (id, title, created_at) VALUES (?, ?, ?)", 
               (session_id, title, timestamp))
     conn.commit()
@@ -236,7 +240,6 @@ with st.sidebar:
     # 3. 설정 섹션
     st.subheader("⚙️ 검색 옵션 설정")
     
-    # (1) 인용 형식
     selected_style_key = st.selectbox(
         "논문 분야 (인용 형식)",
         options=list(CITATION_STYLES.keys()),
@@ -244,7 +247,6 @@ with st.sidebar:
     )
     target_citation_style = CITATION_STYLES[selected_style_key]
 
-    # (2) 논문 개수
     target_paper_count = st.number_input(
         "검색할 논문 개수 (최신순)",
         min_value=1,
@@ -308,8 +310,6 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
-    # [수정] 오류가 발생했던 부분을 단순화하여 수정했습니다.
-    # f-string 안에서 줄바꿈 없이 한 줄로 작성하는 것이 안전합니다.
     with st.spinner(f"🌏 '{prompt}' 검색 중... ({target_paper_count}개)"):
         try:
             english_query = translate_to_english_keyword(prompt)
@@ -360,4 +360,3 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
-
