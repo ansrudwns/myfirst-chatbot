@@ -269,7 +269,7 @@ for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생성됨)..."):
+if prompt := st.chat_input("논문 주제를 입력하세요..."):
     
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
@@ -298,7 +298,7 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
                 ### [번호]. [제목] (연도)
                 * **요약:** (한국어)
                 * **APA Citation:** (URL 포함)
-                * **PDF 링크:** (URL)
+                * **PDF:** (URL)
                 ---
                 """
                 messages_for_api = [{"role": "system", "content": "논문 검색 도우미입니다."}]
@@ -323,3 +323,4 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
             
         except Exception as e:
             st.error(f"오류: {e}")
+
