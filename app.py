@@ -46,7 +46,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def create_session(title="새로운 대화"):
+def create_session(title="새로운 채팅"):
     session_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -175,14 +175,7 @@ if "current_session_id" not in st.session_state:
 
 # --- [사이드바 UI] ---
 with st.sidebar:
-    st.title("🗂️ 대화 관리")
-    
-    if st.button("➕ 새 대화 시작", use_container_width=True):
-        new_id = create_session()
-        st.session_state.current_session_id = new_id
-        st.rerun()
-    
-    st.divider()
+    st.title("🗂️ 채팅 관리")
 
     # 1. 검색 기능
     search_query = st.text_input("🔍 대화 검색", placeholder="키워드 입력...")
@@ -199,36 +192,44 @@ with st.sidebar:
             st.info("결과 없음")
     
     st.divider()
+    
+    if st.button("➕ 새 채팅 시작", use_container_width=True):
+        new_id = create_session()
+        st.session_state.current_session_id = new_id
+        st.rerun()
+    
+    st.divider()
 
-    # 2. 최근 대화 목록 (수정/삭제 기능 통합)
+
+    # 2. 최근 대화 목록 (UI 개선: 간격 좁히기)
     st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
     
     for s_id, s_title, s_date in sessions:
-        # 각 대화를 'Expander(접이식 메뉴)'로 표시
-        # 제목을 클릭하면 메뉴가 펼쳐짐
         with st.expander(f"{s_title} ({s_date})"):
             
-            # (1) 대화 열기 버튼
-            if st.button("📂 대화 열기", key=f"open_{s_id}", use_container_width=True):
-                st.session_state.current_session_id = s_id
-                st.rerun()
-            
-            st.write("---") # 구분선
-            
-            # (2) 이름 변경 기능
-            new_name = st.text_input("제목 수정", value=s_title, key=f"input_{s_id}")
-            if st.button("💾 이름 저장", key=f"save_{s_id}", use_container_width=True):
-                update_session_title(s_id, new_name)
-                st.rerun()
-                
-            # (3) 삭제 기능
-            if st.button("🗑️ 삭제", key=f"del_{s_id}", type="primary", use_container_width=True):
-                delete_session(s_id)
-                # 만약 현재 보고 있는 대화를 삭제했다면 초기화
-                if st.session_state.current_session_id == s_id:
-                    st.session_state.current_session_id = None
-                st.rerun()
+            # [Row 1] 제목 수정 기능 (입력창 + 저장 버튼을 한 줄에)
+            col1, col2 = st.columns([3, 1]) # 3:1 비율로 공간 분할
+            with col1:
+                # label_visibility="collapsed"로 라벨 공간을 없애서 위쪽 여백 삭제
+                new_name = st.text_input("이름 변경", value=s_title, key=f"input_{s_id}", label_visibility="collapsed")
+            with col2:
+                if st.button("💾", key=f"save_{s_id}", help="제목 저장", use_container_width=True):
+                    update_session_title(s_id, new_name)
+                    st.rerun()
+
+            # [Row 2] 대화 열기 & 삭제 (버튼 두 개를 한 줄에)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("📂 열기", key=f"open_{s_id}", use_container_width=True):
+                    st.session_state.current_session_id = s_id
+                    st.rerun()
+            with col_b:
+                if st.button("🗑️ 삭제", key=f"del_{s_id}", type="primary", use_container_width=True):
+                    delete_session(s_id)
+                    if st.session_state.current_session_id == s_id:
+                        st.session_state.current_session_id = None
+                    st.rerun()
 
 # --- [메인 화면 UI] ---
 
@@ -300,3 +301,4 @@ if prompt := st.chat_input("논문 주제를 입력하세요..."):
             
         except Exception as e:
             st.error(f"오류: {e}")
+
