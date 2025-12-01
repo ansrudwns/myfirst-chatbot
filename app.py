@@ -291,12 +291,12 @@ for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생성됨)..."):
+if prompt := st.chat_input("논문 주제를 입력하세요..."):
     
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
-    with st.spinner(f"🌏 '{prompt}' 분석 중..."):
+    with st.spinner(f"🌏 '{prompt}' 검색 중..."):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
@@ -323,7 +323,7 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
                 ### [번호]. [제목] (연도)
                 * **요약:** (한국어)
                 * **Citation ({target_citation_style}):** (형식 준수, URL 포함)
-                * **PDF 링크:** (URL)
+                * **PDF:** (URL)
                 ---
                 """
                 messages_for_api = [{"role": "system", "content": "논문 검색 및 인용 전문가입니다."}]
@@ -348,3 +348,4 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
             
         except Exception as e:
             st.error(f"오류: {e}")
+
