@@ -303,14 +303,14 @@ for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생성됨)..."):
+if prompt := st.chat_input("논문 주제를 입력하세요..."):
     
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
     # [수정] 오류가 발생했던 부분을 단순화하여 수정했습니다.
     # f-string 안에서 줄바꿈 없이 한 줄로 작성하는 것이 안전합니다.
-    with st.spinner(f"🌏 '{prompt}' 분석 중... ({target_paper_count}개)"):
+    with st.spinner(f"🌏 '{prompt}' 검색 중... ({target_paper_count}개)"):
         try:
             english_query = translate_to_english_keyword(prompt)
             st.toast(f"검색어 변환: {english_query}")
@@ -360,3 +360,4 @@ if prompt := st.chat_input("논문 주제를 입력하세요 (자동 제목 생�
             
         except Exception as e:
             st.error(f"오류: {e}")
+
