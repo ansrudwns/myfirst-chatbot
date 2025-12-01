@@ -14,14 +14,13 @@ load_dotenv()
 st.set_page_config(page_title="Paper Mate Pro", page_icon="📚", layout="wide")
 
 # 2. Azure OpenAI 클라이언트 설정
-# (.env 파일에 AZURE_OAI_KEY, AZURE_OAI_ENDPOINT 설정 필수)
 client = AzureOpenAI(
     api_key=os.getenv("AZURE_OAI_KEY"),
     api_version="2024-05-01-preview",
     azure_endpoint=os.getenv("AZURE_OAI_ENDPOINT")
 )
 
-# --- [데이터베이스 관리 함수] SQLite 사용 ---
+# --- [데이터베이스 관리 함수] ---
 DB_NAME = "chat_history.db"
 
 def init_db():
@@ -51,12 +50,31 @@ def create_session(title="새로운 대화"):
     session_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # 한국 시간 표시를 위해 포맷팅
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    final_title = f"{title} ({timestamp})"
-    c.execute("INSERT INTO sessions (id, title) VALUES (?, ?)", (session_id, final_title))
+    final_title = title
+    c.execute("INSERT INTO sessions (id, title, created_at) VALUES (?, ?, ?)", 
+              (session_id, final_title, timestamp))
     conn.commit()
     conn.close()
     return session_id
+
+def update_session_title(session_id, new_title):
+    """세션 제목을 변경합니다."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("UPDATE sessions SET title = ? WHERE id = ?", (new_title, session_id))
+    conn.commit()
+    conn.close()
+
+def get_session_info(session_id):
+    """특정 세션의 정보를 가져옵니다."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT title, created_at FROM sessions WHERE id = ?", (session_id,))
+    row = c.fetchone()
+    conn.close()
+    return row if row else ("알 수 없음", "")
 
 def save_message(session_id, role, content):
     conn = sqlite3.connect(DB_NAME)
@@ -75,57 +93,51 @@ def get_messages(session_id):
     return [{"role": row[0], "content": row[1]} for row in rows]
 
 def get_all_sessions():
+    """모든 세션을 최신순으로 가져옵니다 (날짜 포함)."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT id, title FROM sessions ORDER BY created_at DESC")
+    c.execute("SELECT id, title, created_at FROM sessions ORDER BY created_at DESC")
     sessions = c.fetchall()
     conn.close()
     return sessions
 
-def search_history(keyword):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    query = f"%{keyword}%"
-    c.execute('''
-        SELECT DISTINCT s.id, s.title, m.content 
-        FROM messages m
-        JOIN sessions s ON m.session_id = s.id
-        WHERE m.content LIKE ?
-        ORDER BY m.created_at DESC
-    ''', (query,))
-    results = c.fetchall()
-    conn.close()
-    return results
+# --- [신규 기능] 검색어 번역 함수 ---
+def translate_to_english_keyword(user_query):
+    """
+    사용자의 입력(한글 등)을 ArXiv 검색에 최적화된 '영어 키워드'로 변환합니다.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a research assistant. Convert the user's query into concise English keywords suitable for searching academic papers on ArXiv. Return ONLY the keywords, no other text."},
+                {"role": "user", "content": user_query}
+            ]
+        )
+        english_keyword = response.choices[0].message.content.strip()
+        return english_keyword
+    except Exception:
+        return user_query # 오류 시 원본 그대로 사용
 
-# --- [핵심 수정] ArXiv 논문 검색 함수 (안정성 강화) ---
+# --- [ArXiv 검색 함수] ---
 def search_arxiv(query, max_results=3):
     try:
-        # 1. Client 명시적 생성 (네트워크 오류 방지)
         client = arxiv.Client()
-        
         search = arxiv.Search(
             query=query,
             max_results=max_results,
             sort_by=arxiv.SortCriterion.Relevance
         )
         
-        results_text = []
-        
-        # 2. 제너레이터를 리스트로 변환하여 데이터 확보 확실하게 처리
         results = list(client.results(search))
         
-        # 디버깅: 몇 개 찾았는지 콘솔에 출력
-        print(f"[DEBUG] 검색어: '{query}' / 찾은 논문 수: {len(results)}")
-
         if not results:
-            return None
+            return None, 0 # 결과 텍스트 없음, 개수 0
 
+        results_text = []
         for result in results:
             authors = ", ".join([author.name for author in result.authors])
             published_year = result.published.strftime("%Y")
-            
-            # 3. PDF URL 확보
-            pdf_link = result.pdf_url
             
             paper_data = f"""
             [Paper ID: {result.entry_id}]
@@ -133,67 +145,69 @@ def search_arxiv(query, max_results=3):
             - Authors: {authors}
             - Published Year: {published_year}
             - Abstract: {result.summary.replace(chr(10), " ")} 
-            - PDF Link: {pdf_link}
+            - PDF Link: {result.pdf_url}
             """
             results_text.append(paper_data)
         
-        return "\n\n".join(results_text)
+        return "\n\n".join(results_text), len(results)
 
     except Exception as e:
-        st.error(f"ArXiv 검색 시스템 오류: {str(e)}")
-        return None
+        st.error(f"ArXiv 검색 오류: {e}")
+        return None, 0
 
 # --- [메인 앱 로직] ---
 
-# 0. DB 초기화
 init_db()
 
-# 세션 상태 초기화
+# 세션 상태 관리
 if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None
 
 # --- [사이드바] ---
 with st.sidebar:
-    st.header("🗂️ 대화 관리")
+    st.title("🗂️ 대화 관리")
     
     if st.button("➕ 새 대화 시작", use_container_width=True):
         new_id = create_session()
         st.session_state.current_session_id = new_id
         st.rerun()
-
+    
     st.divider()
 
-    search_query = st.text_input("🔍 대화 검색", placeholder="키워드 입력...")
-    if search_query:
-        st.subheader("검색 결과")
-        results = search_history(search_query)
-        if results:
-            for session_id, title, content_snippet in results:
-                snippet = content_snippet[:30] + "..." if len(content_snippet) > 30 else content_snippet
-                if st.button(f"📄 {title}\nRunning: {snippet}", key=f"search_{session_id}_{uuid.uuid4()}"):
-                    st.session_state.current_session_id = session_id
-                    st.rerun()
-        else:
-            st.info("검색 결과가 없습니다.")
-            
-    st.divider()
+    # [기능 추가] 현재 대화 제목 수정 기능
+    if st.session_state.current_session_id:
+        current_title, _ = get_session_info(st.session_state.current_session_id)
+        with st.expander("✏️ 현재 대화 제목 수정"):
+            new_title_input = st.text_input("새 제목 입력", value=current_title)
+            if st.button("변경 저장", use_container_width=True):
+                update_session_title(st.session_state.current_session_id, new_title_input)
+                st.rerun()
+        st.divider()
 
-    st.subheader("🕒 최근 대화")
+    st.subheader("🕒 최근 대화 목록")
     sessions = get_all_sessions()
-    for s_id, s_title in sessions:
-        if st.button(s_title, key=s_id, use_container_width=True):
+    
+    # [기능 추가] 목록에 날짜/시간 표시
+    for s_id, s_title, s_date in sessions:
+        # 버튼 라벨에 날짜 포함 (작은 글씨 효과는 줄바꿈으로 처리)
+        label = f"{s_title}\nTime: {s_date}"
+        if st.button(label, key=s_id, use_container_width=True):
             st.session_state.current_session_id = s_id
             st.rerun()
 
 # --- [메인 화면] ---
 
+# 초기 세션 설정
 if not st.session_state.current_session_id:
     if sessions:
         st.session_state.current_session_id = sessions[0][0]
     else:
         st.session_state.current_session_id = create_session()
 
-st.title("🎓 Paper Mate Pro")
+# 현재 세션 정보 가져오기
+session_title, session_date = get_session_info(st.session_state.current_session_id)
+st.title(f"🎓 {session_title}")
+st.caption(f"생성일: {session_date} | Paper Mate Pro")
 
 current_messages = get_messages(st.session_state.current_session_id)
 
@@ -201,40 +215,39 @@ for msg in current_messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("논문 주제를 입력하세요 (예: RAG, Transformer)..."):
+if prompt := st.chat_input("한글로 주제를 입력해도 자동으로 찾아줍니다 (예: 대규모 언어 모델)"):
     
     st.chat_message("user").markdown(prompt)
     save_message(st.session_state.current_session_id, "user", prompt)
 
-    with st.spinner(f"🔎 '{prompt}' 관련 논문을 ArXiv에서 검색 중입니다..."):
+    with st.spinner(f"🌏 '{prompt}'을(를) 영어로 변환하여 검색 중입니다..."):
         try:
-            # 검색 실행
-            search_context = search_arxiv(prompt)
+            # 1. [기능 추가] 한글 -> 영어 키워드 변환
+            english_query = translate_to_english_keyword(prompt)
+            st.toast(f"검색어 변환: {english_query}") # 사용자에게 변환된 키워드를 살짝 보여줌 (Toast)
+
+            # 2. ArXiv 검색 실행 (변환된 영어 키워드로)
+            search_context, paper_count = search_arxiv(english_query)
             
             if not search_context:
-                assistant_reply = "검색 결과가 없습니다. 영어로 검색하거나 다른 키워드를 시도해 보세요."
+                assistant_reply = f"'{english_query}'(으)로 검색했으나 결과가 없습니다. 다른 키워드를 시도해 보세요."
             else:
-                # 검색된 논문 개수 확인 (프롬프트 주입용)
-                paper_count = search_context.count("Paper ID:")
-                
-                # --- [핵심 수정] 프롬프트 강화 ---
                 full_prompt = f"""
-                사용자가 '{prompt}'에 대한 논문을 찾고 있습니다.
+                사용자가 '{prompt}'(영어 변환: {english_query})에 대한 논문을 찾고 있습니다.
                 
                 [지시사항]
                 1. 아래 [검색된 논문 데이터]에는 **총 {paper_count}개의 논문**이 있습니다.
-                2. 반드시 **{paper_count}개 논문 모두**에 대해 각각 답변을 작성하세요. 절대 하나로 합치거나 생략하지 마세요.
-                3. APA 인용 작성 시, 논문이 ArXiv 소스이므로 **반드시 URL을 포함**하세요.
+                2. 반드시 **{paper_count}개 논문 모두**에 대해 각각 답변을 작성하세요.
+                3. 한국어로 요약하고, APA 인용에 **반드시 URL을 포함**하세요.
                 
                 [검색된 논문 데이터]
                 {search_context}
                 
-                --- 답변 형식 (각 논문마다 반복) ---
+                --- 답변 형식 (반복) ---
                 ### [번호]. [논문 제목] (연도)
-                * **핵심 요약:** (한국어 3문장 이내)
-                * **APA Citation:** (저자. (연도). 제목. *ArXiv*. URL 형식 준수)
+                * **핵심 요약:** (한국어 3문장)
+                * **APA Citation:** (저자. (연도). 제목. *ArXiv*. URL)
                 * **PDF 링크:** (URL)
-                
                 ---
                 """
                 
